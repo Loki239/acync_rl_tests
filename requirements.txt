@@ -1,0 +1,6 @@
+torch>=1.7.1
+gym==0.17.3
+pybullet>=3.0.6
+numpy<2.0.0
+tensorboard>=2.4.0
+

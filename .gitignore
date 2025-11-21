@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Mac
+.DS_Store
+
+# Logs and tensorboard
+log/
+logs/
+*.log
+events.out.tfevents.*
+
+# Model checkpoints (weights)
+*.pth
+*.ckpt
+
+# Environment specifics
+.env
+venv/
+env/
+

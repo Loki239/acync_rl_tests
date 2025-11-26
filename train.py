@@ -5,6 +5,7 @@ from copy import deepcopy
 from collections import deque
 import random
 import numpy as np
+import csv
 
 # Monkey-patch for gym compatibility with numpy 2.0
 np.bool8 = np.bool_
@@ -19,14 +20,32 @@ import pybullet_envs
 # Set default dtype to float64
 torch.set_default_dtype(torch.float64)
 
-# --- Network Definitions (Same as before) ---
+# --- Initialization ---
+
+def init_weights(m):
+    if isinstance(m, torch.nn.Linear):
+        torch.nn.init.orthogonal_(m.weight, gain=np.sqrt(2))
+        if m.bias is not None:
+            torch.nn.init.constant_(m.bias, 0)
+
+def init_weights_output(m):
+    if isinstance(m, torch.nn.Linear):
+        torch.nn.init.orthogonal_(m.weight, gain=1.0)
+        if m.bias is not None:
+            torch.nn.init.constant_(m.bias, 0)
+
+# --- Network Definitions ---
 
 class Q_FC(torch.nn.Module):
     def __init__(self, obs_size, action_size):
         super(Q_FC, self).__init__()
-        self.fc1 = torch.nn.Linear(obs_size+action_size, 256)
-        self.fc2 = torch.nn.Linear(256, 256)
-        self.fc3 = torch.nn.Linear(256, 1)
+        self.fc1 = torch.nn.Linear(obs_size + action_size, 400)
+        self.fc2 = torch.nn.Linear(400, 300)
+        self.fc3 = torch.nn.Linear(300, 1)
+        
+        # Orthogonal initialization
+        self.apply(init_weights)
+        init_weights_output(self.fc3)
 
     def forward(self, x, a):
         y1 = F.relu(self.fc1(torch.cat((x,a),1)))
@@ -37,9 +56,13 @@ class Q_FC(torch.nn.Module):
 class mu_FC(torch.nn.Module):
     def __init__(self, obs_size, action_size):
         super(mu_FC, self).__init__()
-        self.fc1 = torch.nn.Linear(obs_size, 256)
-        self.fc2 = torch.nn.Linear(256, 256)
-        self.fc3 = torch.nn.Linear(256, action_size)
+        self.fc1 = torch.nn.Linear(obs_size, 400)
+        self.fc2 = torch.nn.Linear(400, 300)
+        self.fc3 = torch.nn.Linear(300, action_size)
+        
+        # Orthogonal initialization
+        self.apply(init_weights)
+        init_weights_output(self.fc3)
 
     def forward(self, x):
         y1 = F.relu(self.fc1(x))
@@ -83,15 +106,12 @@ def worker_process(worker_id, env_name, noise_std, transitions_queue, weight_que
     # Local Actor Network
     actor = mu_FC(obs_size, action_size)
     
-    print(f"Worker {worker_id} started with noise std={noise_std}")
-    
     o = env.reset()
     if isinstance(o, tuple): o = o[0]
 
     episode_reward = 0
     episode_steps = 0
-    episode_count = 0
-
+    
     while True:
         # 1. Check for new weights
         try:
@@ -126,12 +146,8 @@ def worker_process(worker_id, env_name, noise_std, transitions_queue, weight_que
         o = o_1
 
         if d:
-            episode_count += 1
-            # Send reward stats to trainer for logging
+            # Send reward stats to trainer
             reward_queue.put((worker_id, episode_reward, episode_steps))
-            
-            if worker_id == 0 and episode_count % 10 == 0:
-                print(f"Worker {worker_id}: Episode {episode_count} finished, Reward: {episode_reward:.2f}, Steps: {episode_steps}")
             
             episode_reward = 0
             episode_steps = 0
@@ -143,14 +159,21 @@ def worker_process(worker_id, env_name, noise_std, transitions_queue, weight_que
 def trainer_process(env_name, arglist, transitions_queue, weight_queues, reward_queue):
     # Setup
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Trainer started on {device}")
+    print(f"Trainer started on {device} with sync_freq={arglist.sync_freq}")
 
-    # Logging & Saving
-    log_dir = os.path.join("logs", f"{env_name}_seed{arglist.seed}")
+    # Logging
+    run_name = f"sync{arglist.sync_freq}_seed{arglist.seed}"
+    log_dir = os.path.join("logs", run_name)
     os.makedirs(log_dir, exist_ok=True)
+    
     writer = SummaryWriter(log_dir=log_dir)
     models_dir = os.path.join(log_dir, "models")
     os.makedirs(models_dir, exist_ok=True)
+    
+    # CSV Logger
+    csv_file = open(os.path.join(log_dir, "progress.csv"), "w", newline="")
+    csv_writer = csv.writer(csv_file)
+    csv_writer.writerow(["timestamp", "update_step", "total_env_steps", "episode_reward", "episode_len", "actor_loss", "critic_loss"])
 
     # Init Networks
     dummy_env = gym.make(env_name)
@@ -163,22 +186,6 @@ def trainer_process(env_name, arglist, transitions_queue, weight_queues, reward_
     critic = Q_FC(obs_size, action_size).to(device)
     critic_target = deepcopy(critic)
 
-    # Load checkpoint if requested
-    start_step = 0
-    if arglist.resume:
-        ckpt_path = os.path.join(models_dir, "latest.pth")
-        if os.path.exists(ckpt_path):
-            print(f"Resuming from {ckpt_path}")
-            checkpoint = torch.load(ckpt_path, map_location=device)
-            actor.load_state_dict(checkpoint['actor'])
-            critic.load_state_dict(checkpoint['critic'])
-            actor_target.load_state_dict(checkpoint['actor_target'])
-            critic_target.load_state_dict(checkpoint['critic_target'])
-            # Load optimizers if we were strictly resuming state, but for now simple resume is fine
-            start_step = checkpoint['step']
-        else:
-            print("Checkpoint not found, starting from scratch.")
-
     for p in actor_target.parameters(): p.requires_grad = False
     for p in critic_target.parameters(): p.requires_grad = False
 
@@ -188,32 +195,39 @@ def trainer_process(env_name, arglist, transitions_queue, weight_queues, reward_
     replay_buffer = ReplayBuffer(arglist.replay_size)
 
     # Training Loop
-    update_step = start_step
+    update_step = 0
+    total_env_steps = 0
     
     # Sync initial weights
     cpu_state = {k: v.cpu() for k, v in actor.state_dict().items()}
     for q in weight_queues:
         q.put(cpu_state)
 
-    print("Trainer waiting for data...")
-    best_reward = -float('inf')
-    recent_rewards = deque(maxlen=100) # For averaging
+    recent_rewards = deque(maxlen=100)
+    
+    current_actor_loss = 0.0
+    current_critic_loss = 0.0
 
-    while True:
+    while total_env_steps < arglist.n_timesteps:
         # 1. Collect transitions
         while not transitions_queue.empty():
             try:
                 t = transitions_queue.get_nowait()
                 replay_buffer.push(*t)
+                total_env_steps += 1 # Count every step from every worker
             except: break
         
         # 2. Collect Reward Stats
         while not reward_queue.empty():
             try:
-                wid, r, s = reward_queue.get_nowait()
+                wid, r, length = reward_queue.get_nowait()
                 recent_rewards.append(r)
-                writer.add_scalar(f"Reward/Worker_{wid}", r, update_step)
-                writer.add_scalar("Reward/Average_100", np.mean(recent_rewards), update_step)
+                writer.add_scalar(f"Reward/Worker_{wid}", r, total_env_steps)
+                writer.add_scalar("Reward/Average_100", np.mean(recent_rewards), total_env_steps)
+                
+                # Log to CSV per episode
+                csv_writer.writerow([time.time(), update_step, total_env_steps, r, length, current_actor_loss, current_critic_loss])
+                csv_file.flush()
             except: break
 
         # 3. Train
@@ -230,12 +244,14 @@ def trainer_process(env_name, arglist, transitions_queue, weight_queues, reward_
             critic_optimizer.zero_grad()
             critic_loss.backward()
             critic_optimizer.step()
+            current_critic_loss = critic_loss.item()
 
             # Actor
             actor_loss = -torch.mean(critic(O, actor(O)))
             actor_optimizer.zero_grad()
             actor_loss.backward()
             actor_optimizer.step()
+            current_actor_loss = actor_loss.item()
 
             # Soft Updates
             for target_param, param in zip(actor_target.parameters(), actor.parameters()):
@@ -244,15 +260,6 @@ def trainer_process(env_name, arglist, transitions_queue, weight_queues, reward_
                 target_param.data.copy_((1.0 - arglist.tau) * target_param.data + arglist.tau * param.data)
 
             update_step += 1
-
-            # Logging
-            if update_step % 100 == 0:
-                writer.add_scalar("Loss/Critic", critic_loss.item(), update_step)
-                writer.add_scalar("Loss/Actor", actor_loss.item(), update_step)
-
-            if update_step % 1000 == 0:
-                avg_r = np.mean(recent_rewards) if recent_rewards else 0
-                print(f"Update {update_step}, Buffer: {len(replay_buffer)}, Avg Reward: {avg_r:.2f}")
 
             # Sync
             if update_step % arglist.sync_freq == 0:
@@ -263,50 +270,44 @@ def trainer_process(env_name, arglist, transitions_queue, weight_queues, reward_
                         except: pass
                     q.put(cpu_state)
             
-            # Checkpointing
-            if update_step % 5000 == 0:
-                # Save Latest
-                ckpt = {
-                    'actor': actor.state_dict(),
-                    'critic': critic.state_dict(),
-                    'actor_target': actor_target.state_dict(),
-                    'critic_target': critic_target.state_dict(),
-                    'step': update_step
-                }
-                torch.save(ckpt, os.path.join(models_dir, "latest.pth"))
+            # Logging
+            if update_step % 1000 == 0:
+                avg_r = np.mean(recent_rewards) if recent_rewards else 0
+                print(f"Step {total_env_steps}/{arglist.n_timesteps} | Upd {update_step} | Avg Reward: {avg_r:.2f}")
                 
-                # Save Best
-                avg_r = np.mean(recent_rewards) if recent_rewards else -float('inf')
-                if avg_r > best_reward:
-                    best_reward = avg_r
-                    torch.save(ckpt, os.path.join(models_dir, "best.pth"))
-                    print(f"New best model saved with reward: {best_reward:.2f}")
-
         else:
             time.sleep(0.001)
+
+    print("Training finished!")
+    # Save Final Model
+    torch.save(actor.state_dict(), os.path.join(models_dir, "final.pth"))
+    csv_file.close()
 
 if __name__ == '__main__':
     mp.set_start_method('spawn', force=True)
     
-    parser = argparse.ArgumentParser("Async DDPG v2")
+    parser = argparse.ArgumentParser("Async DDPG")
     parser.add_argument("--env", type=str, default="HumanoidBulletEnv-v0")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--sync_freq", type=int, default=5)
-    parser.add_argument("--replay_size", type=int, default=1000000)
+    parser.add_argument("--n_timesteps", type=int, default=2000000)
+    parser.add_argument("--replay_size", type=int, default=200000)
     parser.add_argument("--learning_starts", type=int, default=10000)
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--gamma", type=float, default=0.98)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--tau", type=float, default=0.005)
-    parser.add_argument("--resume", action="store_true", help="Resume training from checkpoint")
     
     args = parser.parse_args()
 
     transitions_queue = mp.Queue(maxsize=10000)
-    reward_queue = mp.Queue(maxsize=10000) # New queue for rewards
+    reward_queue = mp.Queue(maxsize=10000)
     weight_queues = [mp.Queue(maxsize=1) for _ in range(6)]
     
-    stds = [0.05, 0.1, 0.2, 0.3, 0.4, 0.6]
+    # Noise settings: 6 workers with different noise levels centered around 0.1
+    # We use a range to maintain diversity, which is crucial for Async DDPG
+    stds = [0.05, 0.08, 0.1, 0.12, 0.15, 0.2] 
+    
     processes = []
     
     # Start Trainer
@@ -321,10 +322,9 @@ if __name__ == '__main__':
         processes.append(p_worker)
 
     try:
-        for p in processes:
-            p.join()
+        p_trainer.join() # Wait for trainer to finish (it controls the loop)
     except KeyboardInterrupt:
         print("Stopping...")
+    finally:
         for p in processes:
-            p.terminate()
-
+            if p.is_alive(): p.terminate()

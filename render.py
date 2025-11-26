@@ -22,7 +22,7 @@ class mu_FC(torch.nn.Module):
         y = torch.tanh(self.fc3(y2))        
         return y
 
-def enjoy(args):
+def render(args):
     env = gym.make(args.env)
     if args.render:
         env.render(mode='human')
@@ -82,5 +82,5 @@ if __name__ == "__main__":
     parser.add_argument("--render", action="store_true", default=True)
     args = parser.parse_args()
     
-    enjoy(args)
+    render(args)
 

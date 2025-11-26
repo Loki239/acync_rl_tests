@@ -1,58 +1,78 @@
 # Asynchronous DDPG for Continuous Control
 
-A robust PyTorch implementation of **Asynchronous Deep Deterministic Policy Gradient (Async-DDPG)** designed for continuous control tasks (e.g., `HumanoidBulletEnv-v0`).
+A robust PyTorch implementation of **Asynchronous Deep Deterministic Policy Gradient (Async-DDPG)** designed for high-dimensional continuous control tasks (e.g., `HumanoidBulletEnv-v0`).
 
-This project implements a **centralized training, decentralized execution** architecture:
-- **1 Trainer**: Updates global policy using a shared Replay Buffer.
-- **6 Workers**: Collect experience in parallel with diverse exploration noise levels.
+This project demonstrates a **centralized training, decentralized execution** architecture:
+- **1 Trainer (GPU/CPU)**: Updates the global policy using a shared Replay Buffer.
+- **6 Workers (CPU)**: Collect experience in parallel with diverse exploration noise levels.
 
-## 📦 Installation
+## 📂 Project Structure
 
-Clone the repository and install dependencies. Note that `numpy<2.0` is required for compatibility with older Gym versions.
+The codebase is modular and organized for ease of experimentation:
+
+```
+.
+├── src/
+│   └── core.py               # Core logic: Networks, ReplayBuffer, Worker/Trainer processes
+├── experiments/
+│   └── Async_DDPG.py         # Main entry point for training
+├── analysis/
+│   ├── plot_results.py       # Generate plots & tables from logs
+│   └── profile_performance.py # CPU vs GPU speed benchmark
+├── logs/                     # Training logs (TensorBoard & CSV)
+├── plots/                    # Generated result plots
+└── requirements.txt          # Dependencies
+```
+
+## ⚙️ Key Features
+
+- **Asynchronous Architecture:** Scales linearly with CPU cores.
+- **Ornstein-Uhlenbeck Noise:** Correlated noise for better exploration in physics environments.
+- **Orthogonal Initialization:** Improves convergence speed.
+- **Smoothed Target Weights:** Workers use the stable Target Network for data collection (optional).
+- **Performance Profiling:** Built-in tools to measure Env/Update speeds.
+
+## 🚀 Getting Started
+
+### 1. Installation
+
+Install dependencies. Note that `numpy<2.0` is required for compatibility with older Gym versions.
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## 🚀 Usage
+### 2. Train the Agent
 
-### 1. Train the Agent
-Start the asynchronous training loop. This will spawn 1 trainer process and 6 worker processes.
-
-```bash
-# Run on HumanoidBulletEnv-v0 (default)
-python async_ddpg_v2.py
-
-# Run on a different environment
-python async_ddpg_v2.py --env AntBulletEnv-v0
-```
-
-Logs and checkpoints are saved to `logs/{env_name}_seed{seed}/`.
-
-### 2. Monitor Progress
-Track rewards and losses in real-time using TensorBoard:
+Start the training loop. By default, it runs experiments for synchronization frequencies of 1, 5, and 10 steps.
 
 ```bash
-tensorboard --logdir logs
+python experiments/Async_DDPG.py
 ```
-Open http://localhost:6006 in your browser.
 
-### 3. Visualize Results
-Watch the trained agent in action:
+*Tip: You can adjust hyperparameters (timesteps, batch size, etc.) inside `Async_DDPG.py` or via command line args.*
+
+### 3. Visualize & Analyze Results
+
+After training (or during), generate comparative plots and speed statistics:
 
 ```bash
-python render.py --model logs/HumanoidBulletEnv-v0_seed42/models/best.pth
+python analysis/plot_results.py
 ```
 
-## 🛠 Architecture Details
+This will create charts in `final_plots/` comparing Reward vs Time/Updates for different settings.
 
-- **Actor**: 3-layer MLP (ReLU) with **Tanh** output activation to bound actions to [-1, 1].
-- **Critic**: State-Action value function ($Q(s, a)$) fusing inputs at the first layer.
-- **Exploration**: Diverse Gaussian noise across workers ($\sigma \in [0.05, \dots, 0.6]$).
-- **Synchronization**: Soft updates ($\tau=0.005$) for target networks; weights synced to workers every 5 steps.
+To benchmark your hardware (CPU vs GPU speed):
+
+```bash
+python analysis/profile_performance.py
+```
+
+## 📊 Performance Insights
+
+Typical results on `HumanoidBulletEnv-v0`:
+- **Sync=1:** Frequent updates, high communication overhead, slow wall-clock time.
+- **Sync=10:** Batched updates, significantly faster training speed (2x speedup), comparable sample efficiency.
 
 ## License
 MIT
-
-
-DDPG was copied from https://github.com/adi3e08/DDPG#

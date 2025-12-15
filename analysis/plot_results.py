@@ -20,18 +20,20 @@ def generate_report():
     try: plt.style.use('ggplot')
     except: pass
     
-    # Mapping: Label -> Filename
-    logs = {
-        1:  "gpu_logs/progress_sync1.csv",
-        5:  "gpu_logs/progress_sync5.csv",
-        10: "gpu_logs/progress_sync10.csv"
-    }
+    # Mapping: Label -> Filename pattern to search
+    # We look for logs/final_sync{sync}_seed*/progress.csv
+    logs_map = {}
+    for sync in [1, 5, 10]:
+        pattern = f"logs/final_sync{sync}_seed*/progress.csv"
+        found = glob.glob(pattern)
+        if found:
+            logs_map[sync] = found[0] # Take the first match
     
     data = {}
     print(f"{'Experiment':<15} | {'Time (h)':<10} | {'Env Speed':<15} | {'Upd Speed':<15}")
     print("-" * 65)
     
-    for sync, path in logs.items():
+    for sync, path in logs_map.items():
         if not os.path.exists(path):
             print(f"Warning: {path} not found.")
             continue

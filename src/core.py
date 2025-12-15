@@ -103,6 +103,7 @@ class ReplayBuffer:
 
 # --- WORKER ---
 def worker_process(worker_id, env_name, noise_std, transitions_queue, weight_queue, reward_queue, seed):
+    torch.set_num_threads(1)
     try: env = gym.make(env_name, render=False)
     except: env = gym.make(env_name) 
     
@@ -161,6 +162,7 @@ def worker_process(worker_id, env_name, noise_std, transitions_queue, weight_que
 
 # --- TRAINER ---
 def trainer_process(env_name, arglist, transitions_queue, weight_queues, reward_queue, log_dir_prefix="final"):
+    torch.set_num_threads(1)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"--- Starting Trainer: Sync={arglist.sync_freq}, Device={device}, Steps={arglist.n_timesteps} ---")
 

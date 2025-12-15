@@ -111,7 +111,7 @@ def worker_process(worker_id, env_name, noise_std, transitions_queue, weight_que
 
     episode_reward = 0
     episode_steps = 0
-    
+
     while True:
         # 1. Check for new weights
         try:
@@ -204,7 +204,7 @@ def trainer_process(env_name, arglist, transitions_queue, weight_queues, reward_
         q.put(cpu_state)
 
     recent_rewards = deque(maxlen=100)
-    
+
     current_actor_loss = 0.0
     current_critic_loss = 0.0
 
@@ -274,7 +274,7 @@ def trainer_process(env_name, arglist, transitions_queue, weight_queues, reward_
             if update_step % 1000 == 0:
                 avg_r = np.mean(recent_rewards) if recent_rewards else 0
                 print(f"Step {total_env_steps}/{arglist.n_timesteps} | Upd {update_step} | Avg Reward: {avg_r:.2f}")
-                
+
         else:
             time.sleep(0.001)
 

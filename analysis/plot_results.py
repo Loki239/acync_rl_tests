@@ -94,7 +94,7 @@ def generate_report():
         plt.savefig(f"plots/{fname}")
         plt.close()
             
-    print("\nAll honest plots generated in plots/ folder.")
+    print("\nAll plots generated in plots/ folder.")
 
 if __name__ == "__main__":
     generate_report()

@@ -15,7 +15,7 @@ def smooth(scalars, weight=0.98):
     return smoothed
 
 def generate_report():
-    print(">>> Generating Honest Report from logs/ <<<\n")
+    print(">>> Generating Report from logs/ <<<\n")
     os.makedirs("plots", exist_ok=True)
     try: plt.style.use('ggplot')
     except: pass
@@ -85,7 +85,6 @@ def generate_report():
         plt.xlabel(x_col); plt.ylabel(y_col)
         
         if "reward" in y_col:
-            # Dynamic Y-axis limits with a safety margin
             all_y = pd.concat([df[y_col] for df in data.values()])
             y_min, y_max = all_y.min(), all_y.max()
             plt.ylim(max(-200, y_min - 20), min(3000, y_max + 20))

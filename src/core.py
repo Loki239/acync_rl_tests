@@ -13,12 +13,10 @@ import pybullet_envs
 from copy import deepcopy
 from tqdm import tqdm
 
-# Monkey-patch for gym compatibility
 np.bool8 = np.bool_
 
 torch.set_default_dtype(torch.float64)
 
-# --- INITIALIZATION ---
 def init_weights(m):
     if isinstance(m, torch.nn.Linear):
         torch.nn.init.orthogonal_(m.weight, gain=np.sqrt(2))
@@ -31,7 +29,6 @@ def init_actor_output(m):
         if m.bias is not None:
             torch.nn.init.constant_(m.bias, 0)
 
-# --- NOISE ---
 class OUNoise:
     def __init__(self, action_dimension, scale=0.1, mu=0, theta=0.15, sigma=0.2):
         self.action_dimension = action_dimension
@@ -51,7 +48,6 @@ class OUNoise:
         self.state = x + dx
         return self.state * self.scale
 
-# --- MODELS ---
 class Q_FC(torch.nn.Module):
     def __init__(self, obs_size, action_size):
         super(Q_FC, self).__init__()
@@ -84,7 +80,6 @@ class mu_FC(torch.nn.Module):
         y = torch.tanh(self.fc3(y2))        
         return y
 
-# --- BUFFER ---
 class ReplayBuffer:
     def __init__(self, capacity):
         self.buffer = deque(maxlen=capacity)
@@ -101,7 +96,6 @@ class ReplayBuffer:
     def __len__(self):
         return len(self.buffer)
 
-# --- WORKER ---
 def worker_process(worker_id, env_name, noise_std, transitions_queue, weight_queue, reward_queue, seed):
     torch.set_num_threads(1)
     try: env = gym.make(env_name, render=False)
@@ -160,7 +154,6 @@ def worker_process(worker_id, env_name, noise_std, transitions_queue, weight_que
             if isinstance(res, tuple): o = res[0]
             else: o = res
 
-# --- TRAINER ---
 def trainer_process(env_name, arglist, transitions_queue, weight_queues, reward_queue, log_dir_prefix="final"):
     torch.set_num_threads(1)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -192,15 +185,22 @@ def trainer_process(env_name, arglist, transitions_queue, weight_queues, reward_
     actor_target = mu_FC(obs_size, action_size).to(device)
     actor_target.load_state_dict(actor.state_dict())
     
-    critic = Q_FC(obs_size, action_size).to(device)
-    critic_target = Q_FC(obs_size, action_size).to(device)
-    critic_target.load_state_dict(critic.state_dict())
+    critic_1 = Q_FC(obs_size, action_size).to(device)
+    critic_2 = Q_FC(obs_size, action_size).to(device)
+    
+    critic_target_1 = Q_FC(obs_size, action_size).to(device)
+    critic_target_2 = Q_FC(obs_size, action_size).to(device)
+    
+    critic_target_1.load_state_dict(critic_1.state_dict())
+    critic_target_2.load_state_dict(critic_2.state_dict())
 
     for p in actor_target.parameters(): p.requires_grad = False
-    for p in critic_target.parameters(): p.requires_grad = False
+    for p in critic_target_1.parameters(): p.requires_grad = False
+    for p in critic_target_2.parameters(): p.requires_grad = False
 
     actor_optimizer = torch.optim.Adam(actor.parameters(), lr=3e-4)
-    critic_optimizer = torch.optim.Adam(critic.parameters(), lr=3e-4)
+    critic_optimizer_1 = torch.optim.Adam(critic_1.parameters(), lr=3e-4)
+    critic_optimizer_2 = torch.optim.Adam(critic_2.parameters(), lr=3e-4)
     critic_loss_fn = torch.nn.MSELoss()
     replay_buffer = ReplayBuffer(arglist.replay_size)
 
@@ -237,24 +237,41 @@ def trainer_process(env_name, arglist, transitions_queue, weight_queues, reward_
         if len(replay_buffer) >= arglist.batch_size and len(replay_buffer) >= arglist.learning_starts:
             O, A, R, O_1, D = replay_buffer.sample(arglist.batch_size, device)
 
-            q_value = critic(O, A)
             with torch.no_grad():
-                next_q_value = critic_target(O_1, actor_target(O_1))
-                expected_q_value = R.unsqueeze(1) + arglist.gamma * next_q_value * (1 - D.unsqueeze(1))
+                noise = (torch.randn_like(A) * 0.2).clamp(-0.5, 0.5)
+                next_action = (actor_target(O_1) + noise).clamp(-1.0, 1.0)
+                
+                target_q1 = critic_target_1(O_1, next_action)
+                target_q2 = critic_target_2(O_1, next_action)
+                target_q = torch.min(target_q1, target_q2)
+                
+                expected_q_value = R.unsqueeze(1) + arglist.gamma * target_q * (1 - D.unsqueeze(1))
             
-            critic_loss = critic_loss_fn(q_value, expected_q_value)
-            critic_optimizer.zero_grad()
-            critic_loss.backward()
-            critic_optimizer.step()
+            current_q1 = critic_1(O, A)
+            loss_q1 = critic_loss_fn(current_q1, expected_q_value)
+            critic_optimizer_1.zero_grad()
+            loss_q1.backward()
+            torch.nn.utils.clip_grad_norm_(critic_1.parameters(), 0.5) 
+            critic_optimizer_1.step()
+            
+            current_q2 = critic_2(O, A)
+            loss_q2 = critic_loss_fn(current_q2, expected_q_value)
+            critic_optimizer_2.zero_grad()
+            loss_q2.backward()
+            torch.nn.utils.clip_grad_norm_(critic_2.parameters(), 0.5) 
+            critic_optimizer_2.step()
 
-            actor_loss = -torch.mean(critic(O, actor(O)))
+            actor_loss = -torch.mean(critic_1(O, actor(O)))
             actor_optimizer.zero_grad()
             actor_loss.backward()
+            torch.nn.utils.clip_grad_norm_(actor.parameters(), 0.5) 
             actor_optimizer.step()
 
             for tp, p in zip(actor_target.parameters(), actor.parameters()):
                 tp.data.copy_((1.0 - arglist.tau) * tp.data + arglist.tau * p.data)
-            for tp, p in zip(critic_target.parameters(), critic.parameters()):
+            for tp, p in zip(critic_target_1.parameters(), critic_1.parameters()):
+                tp.data.copy_((1.0 - arglist.tau) * tp.data + arglist.tau * p.data)
+            for tp, p in zip(critic_target_2.parameters(), critic_2.parameters()):
                 tp.data.copy_((1.0 - arglist.tau) * tp.data + arglist.tau * p.data)
 
             update_step += 1

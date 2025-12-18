@@ -5,11 +5,9 @@ import time
 import torch.multiprocessing as mp
 from copy import deepcopy
 
-# Add project root to path to allow importing from src
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.core import worker_process, trainer_process
-from analysis.plot_results import generate_report # We will move report script later
 
 def run_training(args):
     transitions_queue = mp.Queue(maxsize=10000)
@@ -18,7 +16,6 @@ def run_training(args):
     stds = [0.05, 0.08, 0.1, 0.12, 0.15, 0.2] 
     
     processes = []
-    # Pass log_dir_prefix to trainer
     p_trainer = mp.Process(target=trainer_process, args=(args.env, args, transitions_queue, weight_queues, reward_queue, "final"))
     p_trainer.start()
     processes.append(p_trainer)
@@ -41,7 +38,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--env", default="HumanoidBulletEnv-v0")
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--n_timesteps", type=int, default=2000000) # 2M Steps
+    parser.add_argument("--n_timesteps", type=int, default=7000000)
     parser.add_argument("--replay_size", type=int, default=200000)
     parser.add_argument("--learning_starts", type=int, default=10000)
     parser.add_argument("--batch_size", type=int, default=256)
@@ -52,7 +49,6 @@ if __name__ == '__main__':
     
     args = parser.parse_args()
     
-    # Configs to run
     CONFIGS = [1, 5, 10]
 
     for sync in CONFIGS:
@@ -62,10 +58,8 @@ if __name__ == '__main__':
         run_training(curr_args)
         time.sleep(5)
 
-    # Try to plot if script exists
     try:
         from analysis.plot_results import generate_report
         generate_report()
     except ImportError:
-        print("Plotting script not found or not moved yet.")
-
+        print("Plotting script not found.")

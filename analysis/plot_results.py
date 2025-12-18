@@ -15,45 +15,37 @@ def smooth(scalars, weight=0.98):
     return smoothed
 
 def generate_report():
-    print(">>> Generating Report from gpu_logs/ <<<\n")
-    os.makedirs("final_plots", exist_ok=True)
+    print(">>> Generating Honest Report from logs/ <<<\n")
+    os.makedirs("plots", exist_ok=True)
     try: plt.style.use('ggplot')
     except: pass
     
-    # Mapping: Label -> Filename pattern to search
-    # We look for logs/final_sync{sync}_seed*/progress.csv
     logs_map = {}
     for sync in [1, 5, 10]:
         pattern = f"logs/final_sync{sync}_seed*/progress.csv"
         found = glob.glob(pattern)
         if found:
-            logs_map[sync] = found[0] # Take the first match
+            logs_map[sync] = found[0]
     
+    if os.path.exists("baseline_progress.csv"):
+        logs_map["Baseline"] = "baseline_progress.csv"
+
     data = {}
     print(f"{'Experiment':<15} | {'Time (h)':<10} | {'Env Speed':<15} | {'Upd Speed':<15}")
     print("-" * 65)
     
     for sync, path in logs_map.items():
-        if not os.path.exists(path):
-            print(f"Warning: {path} not found.")
-            continue
-            
         try:
             df = pd.read_csv(path)
-            # Filter Worker 0 if column exists, otherwise take all
             if 'worker_id' in df.columns:
                 df = df[df['worker_id'] == 0]
             
             df['time_hours'] = (df['timestamp'] - df['timestamp'].iloc[0]) / 3600
-            data[sync] = df
+            data[sync] = df.sort_values('total_env_steps')
             
-            # Stats (First 200k steps if possible)
-            df_limit = df[df['total_env_steps'] <= 200000]
-            if len(df_limit) < 10: df_limit = df
-            
-            dt = df_limit['timestamp'].iloc[-1] - df_limit['timestamp'].iloc[0]
-            d_env = df_limit['total_env_steps'].iloc[-1] - df_limit['total_env_steps'].iloc[0]
-            d_upd = df_limit['update_step'].iloc[-1] - df_limit['update_step'].iloc[0]
+            dt = df['timestamp'].iloc[-1] - df['timestamp'].iloc[0]
+            d_env = df['total_env_steps'].iloc[-1] - df['total_env_steps'].iloc[0]
+            d_upd = df['update_step'].iloc[-1] - df['update_step'].iloc[0]
             
             env_speed = d_env / dt if dt > 0 else 0
             upd_speed = d_upd / dt if dt > 0 else 0
@@ -63,9 +55,10 @@ def generate_report():
         except Exception as e:
             print(f"Error reading {path}: {e}")
 
-    if not data: return
+    if not data:
+        print("No logs found in logs/ or baseline_progress.csv")
+        return
 
-    # Plots
     metrics = [
         ('time_hours', 'episode_reward', 'Reward vs Time (Hours)', 'reward_time.png', True),
         ('total_env_steps', 'episode_reward', 'Reward vs Env Steps', 'reward_steps.png', True),
@@ -76,27 +69,33 @@ def generate_report():
 
     for x_col, y_col, title, fname, do_smooth in metrics:
         plt.figure(figsize=(10, 6))
-        for sync, df in data.items():
-            df = df.sort_values(x_col)
+        for sync in sorted(data.keys(), key=lambda x: str(x)):
+            df = data[sync]
             x = df[x_col]
             y = df[y_col]
-            
+
             if do_smooth:
-                plt.plot(x, y, alpha=0.2, label=f'Sync {sync} (raw)')
-                y_s = smooth(y)
+                plt.plot(x, y, alpha=0.15, label=f'Sync {sync} (raw)')
+                y_s = smooth(pd.Series(y), weight=0.98)
                 plt.plot(x[:len(y_s)], y_s, label=f'Sync {sync}', linewidth=2.5)
             else:
                 plt.plot(x, y, label=f'Sync {sync}', linewidth=2)
                 
         plt.title(title)
         plt.xlabel(x_col); plt.ylabel(y_col)
+        
+        if "reward" in y_col:
+            # Dynamic Y-axis limits with a safety margin
+            all_y = pd.concat([df[y_col] for df in data.values()])
+            y_min, y_max = all_y.min(), all_y.max()
+            plt.ylim(max(-200, y_min - 20), min(3000, y_max + 20))
+            
         plt.legend(); plt.grid(True, alpha=0.3)
         plt.tight_layout()
-        plt.savefig(f"final_plots/{fname}")
+        plt.savefig(f"plots/{fname}")
         plt.close()
-    
-    print("\nPlots saved to final_plots/")
+            
+    print("\nAll honest plots generated in plots/ folder.")
 
 if __name__ == "__main__":
     generate_report()
-

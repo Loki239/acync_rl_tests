@@ -1,6 +1,5 @@
 import time
 import numpy as np
-# Monkey-patch for gym compatibility (Must be before gym import)
 np.bool8 = np.bool_
 
 import torch
@@ -8,7 +7,6 @@ import gym
 import pybullet_envs
 import matplotlib.pyplot as plt
 
-# --- Mock Classes ---
 class Q_FC(torch.nn.Module):
     def __init__(self, obs, act):
         super().__init__()
@@ -39,7 +37,6 @@ def benchmark_training(device, batch_size=256, n_steps=500):
         A = torch.randn(batch_size, act_dim).to(dev)
         R = torch.randn(batch_size).to(dev)
         
-        # Warmup
         for _ in range(10):
             loss = torch.nn.functional.mse_loss(critic(O, A), R.unsqueeze(1))
             loss.backward()
@@ -70,8 +67,7 @@ def benchmark_inference(device, batch_size, n_steps=1000):
         obs_dim, act_dim = 44, 17
         actor = mu_FC(obs_dim, act_dim).to(dev)
         obs = torch.randn(batch_size, obs_dim).to(dev)
-        
-        # Warmup
+
         for _ in range(10): _ = actor(obs)
         if device == "cuda": torch.cuda.synchronize()
             
@@ -109,25 +105,20 @@ def benchmark_env(n_steps=1000):
 if __name__ == "__main__":
     results = {}
     
-    # 1. Training
     results['Train (CPU)'] = benchmark_training("cpu")
     if torch.cuda.is_available():
         results['Train (GPU)'] = benchmark_training("cuda")
         
-    # 2. Inference Batch=1 (Worker style)
     results['Infer B=1 (CPU)'] = benchmark_inference("cpu", 1)
     if torch.cuda.is_available():
         results['Infer B=1 (GPU)'] = benchmark_inference("cuda", 1)
         
-    # 3. Inference Batch=6 (Vectorized style)
     results['Infer B=6 (CPU)'] = benchmark_inference("cpu", 6)
     if torch.cuda.is_available():
         results['Infer B=6 (GPU)'] = benchmark_inference("cuda", 6)
         
-    # 4. Env
     results['Env Step'] = benchmark_env()
     
-    # Plot
     names = list(results.keys())
     means = [v[0] for v in results.values()]
     stds = [v[1] for v in results.values()]

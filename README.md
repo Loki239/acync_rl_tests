@@ -1,78 +1,62 @@
 # Asynchronous DDPG for Continuous Control
 
-A robust PyTorch implementation of **Asynchronous Deep Deterministic Policy Gradient (Async-DDPG)** designed for high-dimensional continuous control tasks (e.g., `HumanoidBulletEnv-v0`).
+A robust PyTorch implementation of **Asynchronous Deep Deterministic Policy Gradient (Async-DDPG)** optimized for high-dimensional control tasks like `HumanoidBulletEnv-v0`. The implementation incorporates key TD3-style improvements for maximum stability.
 
-This project demonstrates a **centralized training, decentralized execution** architecture:
-- **1 Trainer (GPU/CPU)**: Updates the global policy using a shared Replay Buffer.
-- **6 Workers (CPU)**: Collect experience in parallel with diverse exploration noise levels.
+## 🚀 Key Features
+
+- **Asynchronous Architecture:** 1 Centralized Trainer (GPU/CPU) and 6 Parallel Workers (CPU) for efficient data collection.
+- **TD3-style Stabilizations:** 
+    - **Twin Critics:** Clipped Double Q-Learning to eliminate overestimation bias.
+    - **Target Policy Smoothing:** Prevents overfitting to Q-function inaccuracies.
+    - **Gradient Clipping:** Protects weights from explosive updates during unstable episodes.
+- **Advanced Training Techniques:**
+    - **Reward Scaling:** Rewards are scaled by 0.1 for more stable Q-value estimation.
+    - **Orthogonal Initialization:** Ensures healthy gradient flow at the start of training.
+    - **OU Noise:** Correlated Ornstein-Uhlenbeck noise for better physical exploration.
+    - **Thread Optimization:** Forced `torch.set_num_threads(1)` per process to maximize server CPU efficiency.
 
 ## 📂 Project Structure
-
-The codebase is modular and organized for ease of experimentation:
 
 ```
 .
 ├── src/
-│   └── core.py               # Core logic: Networks, ReplayBuffer, Worker/Trainer processes
+│   └── core.py               # Optimized TD3-style Async logic & Networks
 ├── experiments/
-│   └── Async_DDPG.py         # Main entry point for training
+│   └── Async_DDPG.py         # Main training script (Sync 1, 5, 10)
 ├── analysis/
-│   ├── plot_results.py       # Generate plots & tables from logs
-│   └── profile_performance.py # CPU vs GPU speed benchmark
-├── logs/                     # Training logs (TensorBoard & CSV)
-├── plots/                    # Generated result plots
-└── requirements.txt          # Dependencies
+│   ├── plot_results.py       # honest visualization of CSV logs
+│   └── profile_performance.py # Hardware speed benchmarks
+├── plots/                    # Generated result charts
+├── requirements.txt          # Dependencies
+└── README.md
 ```
 
-## ⚙️ Key Features
-
-- **Asynchronous Architecture:** Scales linearly with CPU cores.
-- **Ornstein-Uhlenbeck Noise:** Correlated noise for better exploration in physics environments.
-- **Orthogonal Initialization:** Improves convergence speed.
-- **Smoothed Target Weights:** Workers use the stable Target Network for data collection (optional).
-- **Performance Profiling:** Built-in tools to measure Env/Update speeds.
-
-## 🚀 Getting Started
-
-### 1. Installation
-
-Install dependencies. Note that `numpy<2.0` is required for compatibility with older Gym versions.
+## 🛠 Installation
 
 ```bash
 pip install -r requirements.txt
+pip install "shimmy>=2.0"  # Required for Gym/Gymnasium compatibility
 ```
 
-### 2. Train the Agent
+*Note: Requires `numpy<2.0` for legacy Gym support.*
 
-Start the training loop. By default, it runs experiments for synchronization frequencies of 1, 5, and 10 steps.
+## 📈 Running Experiments
 
+### 1. Start Training
+Runs sequential experiments for synchronization frequencies of 1, 5, and 10 steps:
 ```bash
 python experiments/Async_DDPG.py
 ```
 
-*Tip: You can adjust hyperparameters (timesteps, batch size, etc.) inside `Async_DDPG.py` or via command line args.*
-
-### 3. Visualize & Analyze Results
-
-After training (or during), generate comparative plots and speed statistics:
-
+### 2. Generate Reports
+Processes CSV logs and generates honest plots in the `plots/` folder:
 ```bash
 python analysis/plot_results.py
 ```
 
-This will create charts in `final_plots/` comparing Reward vs Time/Updates for different settings.
-
-To benchmark your hardware (CPU vs GPU speed):
-
-```bash
-python analysis/profile_performance.py
-```
-
 ## 📊 Performance Insights
 
-Typical results on `HumanoidBulletEnv-v0`:
-- **Sync=1:** Frequent updates, high communication overhead, slow wall-clock time.
-- **Sync=10:** Batched updates, significantly faster training speed (2x speedup), comparable sample efficiency.
+The implementation is designed to demonstrate that **Sync=10** typically provides a 2x speedup in wall-clock time over **Sync=1** due to reduced communication overhead, while the **Twin Critic** architecture prevents the policy collapse often seen in vanilla DDPG.
 
 ## License
 MIT

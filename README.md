@@ -2,7 +2,7 @@
 
 A robust PyTorch implementation of **Asynchronous Deep Deterministic Policy Gradient (Async-DDPG)** optimized for high-dimensional control tasks like `HumanoidBulletEnv-v0`. The implementation incorporates key TD3-style improvements for maximum stability.
 
-## 🚀 Key Features
+## Key Features
 
 - **Asynchronous Architecture:** 1 Centralized Trainer (GPU/CPU) and 6 Parallel Workers (CPU) for efficient data collection.
 - **TD3-style Stabilizations:** 
@@ -35,7 +35,7 @@ A robust PyTorch implementation of **Asynchronous Deep Deterministic Policy Grad
 
 ```bash
 pip install -r requirements.txt
-pip install "shimmy>=2.0"  # Required for Gym/Gymnasium compatibility
+pip install "shimmy>=2.0"  # Required for Gym/Gymnasium compatibility. Needed to use in vanilla ddpg from TD3
 ```
 
 *Note: Requires `numpy<2.0` for legacy Gym support.*
@@ -49,7 +49,7 @@ python experiments/Async_DDPG.py
 ```
 
 ### 2. Generate Reports
-Processes CSV logs and generates honest plots in the `plots/` folder:
+Processes CSV logs and generate plots in the `plots/` folder:
 ```bash
 python analysis/plot_results.py
 ```

@@ -1,6 +1,6 @@
 # Asynchronous DDPG for Continuous Control
 
-A robust PyTorch implementation of **Asynchronous Deep Deterministic Policy Gradient (Async-DDPG)** optimized for high-dimensional control tasks like `HumanoidBulletEnv-v0`. The implementation incorporates key TD3-style improvements for maximum stability.
+A robust PyTorch implementation of **Asynchronous Deep Deterministic Policy Gradient (Async-DDPG)** optimized for high-dimensional control tasks like `HumanoidBulletEnv-v0`.
 
 ## Key Features
 
@@ -24,7 +24,7 @@ A robust PyTorch implementation of **Asynchronous Deep Deterministic Policy Grad
 ├── experiments/
 │   └── Async_DDPG.py         # Main training script (Sync 1, 5, 10)
 ├── analysis/
-│   ├── plot_results.py       # honest visualization of CSV logs
+│   ├── plot_results.py       # visualization of CSV logs
 │   └── profile_performance.py # Hardware speed benchmarks
 ├── plots/                    # Generated result charts
 ├── requirements.txt          # Dependencies
@@ -56,7 +56,7 @@ python analysis/plot_results.py
 
 ## 📊 Performance Insights
 
-The implementation is designed to demonstrate that **Sync=10** typically provides a 2x speedup in wall-clock time over **Sync=1** due to reduced communication overhead, while the **Twin Critic** architecture prevents the policy collapse often seen in vanilla DDPG.
+The implementation is designed to demonstrate that **Sync=10** typically provides a speedup in wall-clock time over **Sync=1** due to reduced communication overhead, while the **Twin Critic** architecture prevents the policy collapse not rarely seen in vanilla DDPG.
 
 ## License
 MIT
